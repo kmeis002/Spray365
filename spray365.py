@@ -272,6 +272,9 @@ def initialize():
 
     generate_mode_parser.add_argument("-mD", "--min_cred_loop_delay", type=int,
                                       help="Minimum time to wait between authentication attempts for a given user. This option takes into account the time one spray iteration will take, so a pre-authentication delay may not occur every time (disable with 0)", default=0)
+    
+    generate_mode_parser.add_argument("-A", "--all_combos", action="store_true", 
+                                      help="Generates an execution plan for all users/password combinations to be attempted against all AAD enpoints and Client IDs. Meant to be used with already confirmed user/password combinations. Cannot  be used with -pf", default=False)
 
     user_agent_argument_group = generate_mode_parser.add_mutually_exclusive_group()
     user_agent_argument_group.add_argument("-cUA", "--custom_user_agent", type=str,
@@ -339,6 +342,9 @@ def validate_args(args, mode):
         ):
             print_error("Generate mode arguments are invalid")
 
+        if (args.all_combos and args.password_file):
+            print_error("-A / --all_combos should only be used with a -p, but -pf was used instead.")
+
     elif mode == "spray":
         execution_plan_arg_valid = args.execution_plan is not None and os.path.isfile(
             args.execution_plan)
@@ -391,6 +397,30 @@ def get_credential_combinations(domain, usernames, passwords, client_ids, endpoi
                 Credential(domain, username, password, random.choice(
                     client_id_values), random.choice(endpoint_id_values), random.choice(user_agent_values), delay)
             )
+    return combinations
+
+#Generates combinations through cartesian combinations of (username) X (password) X (client_ids) X (endpoint_ids). User_agent is still random and delay is constant
+def get_credentials_cartesian_combinations(domain, usernames, passwords, client_ids, endpoint_ids, user_agents, delay):
+    combinations = []
+
+    client_id_values = list(client_ids.items())
+    endpoint_id_values = list(endpoint_ids.items())
+    user_agent_values = list(user_agents.items())
+
+    for password in passwords:
+        for username in list(dict.fromkeys(usernames)):
+            username = username.strip()
+
+            bad_username_format = "@" in username or "\\" in username
+            if bad_username_format:
+                print_error(
+                    "Username '%s' is formatted like a UPN (user@domain.com) or samAccountName (domain.com\\user). Expected just username." % username)
+            for cid in client_id_values:
+                for eid in endpoint_id_values:
+                    combinations.append(
+                        Credential(domain, username, password, cid, eid, random.choice(user_agent_values), delay)
+                    )
+
     return combinations
 
 
@@ -464,17 +494,20 @@ def generate_execution_plan(args):
     print_info("Generating execution plan for %d credentials with a %ds delay after each attempt..." %
                ((len(user_list) * len(password_list)), delay))
 
-    if not args.aad_client:
+    if args.all_combos:
+        print_info("Execution plan will include all AAD client IDs")
+    elif not args.aad_client:
         print_info("Execution plan will use random AAD client IDs")
     else:
         print_info("Execution plan will use the provided AAD client ID(s)")
 
-    if not args.aad_endpoint:
+    if args.all_combos:
+        print_info("Execution plan will include all AAD endpoint IDs")
+    elif not args.aad_endpoint:
         print_info("Execution plan will use random AAD endpoint IDs")
     else:
         print_info("Execution plan will use the provided AAD endpoint ID(s)")
 
-    spray_duration = len(user_list) * len(password_list) * delay
 
     # Source: https://github.com/Gerenios/AADInternals/blob/master/AccessToken_utils.ps1
     endpoint_ids = {
@@ -540,6 +573,12 @@ def generate_execution_plan(args):
         "windows_configdesigner": "de0853a1-ab20-47bd-990b-71ad5077ac7b",
         "www": "00000006-0000-0ff1-ce00-000000000000",
     }
+
+
+    if args.all_combos:
+        spray_duration = len(user_list) * len(password_list) * len(client_ids) * len(endpoint_ids) * delay
+    else:
+        spray_duration = len(user_list) * len(password_list) * delay
 
     if args.aad_client:
         client_ids = process_custom_aad_values("custom_cid_", args.aad_client)
@@ -634,7 +673,17 @@ def generate_execution_plan(args):
         ))
         print_info("This random execution plan will take %d seconds longer than spraying with a simple (non-random) execution plan" %
                    (fastest_runtime[0] - spray_duration))
+    elif args.all_combos:
+        print_warning("This execution plan will attempt multiple duplicate credentials against all end-points. It will very likely cause account lockouts with invalid credentials. Recommended to generate this plan with only ONE valid username/password pair OR duplicate password use over multiple accounts.")
+        raw_combinations = get_credentials_cartesian_combinations(domain, user_list, password_list, client_ids, endpoint_ids, user_agents, delay)
+        auth_combinations_by_user = group_credential_combinations_by_key(
+                raw_combinations, lambda cred: cred.username)
 
+
+        auth_creds = auth_combinations_by_user
+
+        print_info("Cartesion combination execution plan identified")
+        print_info("Spraying will take %d seconds" % spray_duration)
     else:
         raw_combinations = get_credential_combinations(
             domain, user_list, password_list, client_ids, endpoint_ids, user_agents, delay)

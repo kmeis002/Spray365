@@ -83,6 +83,8 @@ $ python3 spray365.py spray --execution_plan ex-plan.s365
 
 `-S / --shuffle_auth_order`: Shuffle order of authentication attempts so that each iteration (User1:Pass1, User2:Pass1, User3:Pass1) will be sprayed in a random order, and with a random arrangement of passwords, e.g (User4:Pass16, User13:Pass25, User19:Pass40). Be aware this option introduces the possibility that the time between consecutive authentication attempts for a given user may occur DELAY seconds apart. Consider using the -mD/--min_cred_loop_delay option to enforce a minimum delay between authentication attempts for any given user. (default: False)
 
+`-A / --all_combos`: Generates an execution plan that sprays username:password combinations against all AAD endpoints and client ids. Intended to be used with verified credentials to determine if any endpoint was left with MFA disabled. Must be used only with -p.  (default: False)
+
 `-SO / --shuffle_optimization_attempts <int>`: Number of random execution plans to generate for identifying the fastest execution plan (default: 10)
 
 `-mD / --min_cred_loop_delay <int>`: Minimum time to wait between authentication attempts for a given user. This option takes into account the time one spray iteration will take, so a pre-authentication delay may not occur every time (disable with 0) (default: 0)
